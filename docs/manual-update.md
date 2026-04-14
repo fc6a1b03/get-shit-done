@@ -40,6 +40,7 @@ Replace `--claude` with the flag for your runtime:
 | Cursor | `--cursor` |
 | Windsurf | `--windsurf` |
 | Augment | `--augment` |
+| Kimi | `--kimi` |
 | All runtimes | `--all` |
 
 Use `--local` instead of `--global` for a project-scoped install.
@@ -52,6 +53,8 @@ The installer performs a clean wipe-and-replace of GSD-managed directories only:
 - `~/.claude/commands/gsd/` — slash commands
 - `~/.claude/agents/gsd-*.md` — GSD agents
 - `~/.claude/hooks/dist/` — compiled hooks
+- `~/.kimi/skills/gsd-*/SKILL.md` — Kimi skills
+- `~/.kimi/agents/gsd-*/agent.yaml` — Kimi agents
 
 **What is preserved:**
 - Custom agents not prefixed with `gsd-`

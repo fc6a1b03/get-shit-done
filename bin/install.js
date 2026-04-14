@@ -63,6 +63,7 @@ const hasOpencode = args.includes('--opencode');
 const hasClaude = args.includes('--claude');
 const hasGemini = args.includes('--gemini');
 const hasKilo = args.includes('--kilo');
+const hasKimi = args.includes('--kimi');
 const hasCodex = args.includes('--codex');
 const hasCopilot = args.includes('--copilot');
 const hasAntigravity = args.includes('--antigravity');
@@ -80,7 +81,7 @@ const hasUninstall = args.includes('--uninstall') || args.includes('-u');
 // Runtime selection - can be set by flags or interactive prompt
 let selectedRuntimes = [];
 if (hasAll) {
-  selectedRuntimes = ['claude', 'kilo', 'opencode', 'gemini', 'codex', 'copilot', 'antigravity', 'cursor', 'windsurf', 'augment', 'trae', 'qwen', 'codebuddy', 'cline'];
+  selectedRuntimes = ['claude', 'kilo', 'opencode', 'gemini', 'codex', 'copilot', 'antigravity', 'cursor', 'windsurf', 'augment', 'trae', 'qwen', 'codebuddy', 'cline', 'kimi'];
 } else if (hasBoth) {
   selectedRuntimes = ['claude', 'opencode'];
 } else {
@@ -88,6 +89,7 @@ if (hasAll) {
   if (hasOpencode) selectedRuntimes.push('opencode');
   if (hasGemini) selectedRuntimes.push('gemini');
   if (hasKilo) selectedRuntimes.push('kilo');
+  if (hasKimi) selectedRuntimes.push('kimi');
   if (hasCodex) selectedRuntimes.push('codex');
   if (hasCopilot) selectedRuntimes.push('copilot');
   if (hasAntigravity) selectedRuntimes.push('antigravity');
@@ -149,6 +151,7 @@ function getDirName(runtime) {
   if (runtime === 'qwen') return '.qwen';
   if (runtime === 'codebuddy') return '.codebuddy';
   if (runtime === 'cline') return '.cline';
+  if (runtime === 'kimi') return '.kimi';
   return '.claude';
 }
 
@@ -184,6 +187,7 @@ function getConfigDirFromHome(runtime, isGlobal) {
   if (runtime === 'qwen') return "'.qwen'";
   if (runtime === 'codebuddy') return "'.codebuddy'";
   if (runtime === 'cline') return "'.cline'";
+  if (runtime === 'kimi') return "'.kimi'";
   return "'.claude'";
 }
 
@@ -257,6 +261,17 @@ function getGlobalDir(runtime, explicitDir = null) {
       return expandTilde(explicitDir);
     }
     return getKiloGlobalDir();
+  }
+
+  if (runtime === 'kimi') {
+    // Kimi: --config-dir > KIMI_CONFIG_DIR > ~/.kimi
+    if (explicitDir) {
+      return expandTilde(explicitDir);
+    }
+    if (process.env.KIMI_CONFIG_DIR) {
+      return expandTilde(process.env.KIMI_CONFIG_DIR);
+    }
+    return path.join(os.homedir(), '.kimi');
   }
 
   if (runtime === 'gemini') {
@@ -3496,6 +3511,230 @@ function convertClaudeToGeminiToml(content) {
   return toml;
 }
 
+// Kimi CLI tool mapping from Claude Code tool names
+const claudeToKimiTools = {
+  Bash: 'Shell',
+  Read: 'ReadFile',
+  Write: 'WriteFile',
+  Edit: 'StrReplaceFile',
+  Glob: 'Glob',
+  Grep: 'Grep',
+  Task: 'Agent',
+  WebSearch: 'SearchWeb',
+  WebFetch: 'FetchURL',
+};
+
+const claudeToKimiAgentToolNamespaces = {
+  Bash: 'kimi_cli.tools.shell:Shell',
+  Read: 'kimi_cli.tools.file:ReadFile',
+  Write: 'kimi_cli.tools.file:WriteFile',
+  Edit: 'kimi_cli.tools.file:StrReplaceFile',
+  Glob: 'kimi_cli.tools.file:Glob',
+  Grep: 'kimi_cli.tools.file:Grep',
+  Task: 'kimi_cli.tools.multiagent:Task',
+  WebSearch: 'kimi_cli.tools.web:WebSearch',
+  WebFetch: 'kimi_cli.tools.web:FetchURL',
+};
+
+function convertClaudeToolToKimiToolName(claudeTool) {
+  if (claudeTool in claudeToKimiTools) {
+    return claudeToKimiTools[claudeTool];
+  }
+  if (claudeTool.startsWith('mcp__')) {
+    return claudeTool;
+  }
+  return claudeTool;
+}
+
+function convertClaudeToolToKimiAgentTool(claudeTool) {
+  if (claudeTool in claudeToKimiAgentToolNamespaces) {
+    return claudeToKimiAgentToolNamespaces[claudeTool];
+  }
+  if (claudeTool.startsWith('mcp__')) {
+    return claudeTool;
+  }
+  return null;
+}
+
+function applyKimiBodyReplacements(content) {
+  let converted = content;
+  // Replace tool invocations in body text
+  converted = converted.replace(/\bBash\(/g, 'Shell(');
+  converted = converted.replace(/\bRead\(/g, 'ReadFile(');
+  converted = converted.replace(/\bWrite\(/g, 'WriteFile(');
+  converted = converted.replace(/\bEdit\(/g, 'StrReplaceFile(');
+  converted = converted.replace(/\bTask\(/g, 'Agent(');
+  converted = converted.replace(/\bWebSearch\(/g, 'SearchWeb(');
+  converted = converted.replace(/\bWebFetch\(/g, 'FetchURL(');
+  // Replace standalone tool name references
+  converted = converted.replace(/\bAskUserQuestion\b/g, 'question');
+  converted = converted.replace(/\bSlashCommand\b/g, 'skill');
+  converted = converted.replace(/\bTodoWrite\b/g, 'todo tracking');
+  // Replace paths
+  converted = converted.replace(/~\/\.claude\b/g, '~/.kimi');
+  converted = converted.replace(/\$HOME\/\.claude\b/g, '$HOME/.kimi');
+  converted = converted.replace(/\.\/\.claude\//g, './.kimi/');
+  converted = converted.replace(/~\/\.opencode\b/g, '~/.kimi');
+  converted = converted.replace(/~\/\.kilo\b/g, '~/.kimi');
+  // Runtime-neutral agent references
+  converted = neutralizeAgentReferences(converted, 'AGENTS.md');
+  return converted;
+}
+
+/**
+ * Convert Claude Code command markdown to Kimi CLI skill format.
+ * Kimi skills live at skills/<name>/SKILL.md with a minimal frontmatter.
+ */
+function convertClaudeToKimiSkill(content, skillName) {
+  let convertedContent = applyKimiBodyReplacements(content);
+
+  if (!convertedContent.startsWith('---')) {
+    return convertedContent;
+  }
+
+  const endIndex = convertedContent.indexOf('---', 3);
+  if (endIndex === -1) {
+    return convertedContent;
+  }
+
+  const frontmatter = convertedContent.substring(3, endIndex).trim();
+  const body = convertedContent.substring(endIndex + 3);
+
+  const name = skillName || extractFrontmatterField(frontmatter, 'name') || 'unknown';
+  const description = extractFrontmatterField(frontmatter, 'description') || '';
+
+  const cleanFrontmatter = `---\nname: ${yamlIdentifier(name)}\ndescription: ${yamlQuote(toSingleLine(description))}\ntype: standard\n---`;
+  return `${cleanFrontmatter}${body}`;
+}
+
+/**
+ * Convert Claude Code agent markdown to Kimi CLI agent directory components.
+ * Returns { agentYaml, systemMd, subYaml }.
+ */
+function convertClaudeToKimiAgent(content) {
+  let convertedContent = applyKimiBodyReplacements(content);
+
+  const { frontmatter, body } = extractFrontmatterAndBody(convertedContent);
+  const name = frontmatter ? (extractFrontmatterField(frontmatter, 'name') || 'unknown') : 'unknown';
+  const description = frontmatter ? (extractFrontmatterField(frontmatter, 'description') || '') : '';
+  const toolsRaw = frontmatter ? (extractFrontmatterField(frontmatter, 'tools') || '') : '';
+
+  const tools = toolsRaw
+    .split(/[,\s]+/)
+    .map(t => t.trim())
+    .filter(Boolean)
+    .map(convertClaudeToolToKimiAgentTool)
+    .filter(Boolean);
+
+  // Deduplicate while preserving order
+  const seen = new Set();
+  const uniqueTools = [];
+  for (const t of tools) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      uniqueTools.push(t);
+    }
+  }
+
+  const agentYamlLines = [
+    'version: 1',
+    'agent:',
+    `  name: ${yamlIdentifier(name)}`,
+    '  system_prompt_path: ./system.md',
+  ];
+
+  if (uniqueTools.length > 0) {
+    agentYamlLines.push('  tools:');
+    for (const t of uniqueTools) {
+      agentYamlLines.push(`    - "${t}"`);
+    }
+  }
+
+  const agentYaml = agentYamlLines.join('\n') + '\n';
+
+  const systemMd = body.trimStart();
+
+  const subYamlLines = [
+    'version: 1',
+    'agent:',
+    '  extend: ./agent.yaml',
+    '  system_prompt_args:',
+    '    ROLE_ADDITIONAL: |',
+    '      You are now running as a GSD subagent. All messages are sent by the main GSD orchestrator.',
+    '      The orchestrator cannot see your detailed context - only your final summary.',
+    '      ',
+    '      IMPORTANT: Provide a COMPREHENSIVE summary of:',
+    '      - What you did',
+    '      - What files you modified (with paths)',
+    '      - Any issues encountered',
+    '      - Key decisions made',
+    '  exclude_tools:',
+    '    - "kimi_cli.tools.multiagent:Task"',
+    '    - "kimi_cli.tools.multiagent:CreateSubagent"',
+    '  subagents: {}',
+  ];
+
+  const subYaml = subYamlLines.join('\n') + '\n';
+
+  return { agentYaml, systemMd, subYaml, name, description };
+}
+
+/**
+ * Copy commands to Kimi CLI skills structure.
+ * Kimi expects: skills/gsd-help/SKILL.md
+ * Source structure: commands/gsd/help.md
+ */
+function copyCommandsAsKimiSkills(srcDir, skillsDir, prefix, pathPrefix, runtime) {
+  if (!fs.existsSync(srcDir)) {
+    return;
+  }
+
+  fs.mkdirSync(skillsDir, { recursive: true });
+
+  // Remove previous GSD Kimi skills to avoid stale command skills
+  const existing = fs.readdirSync(skillsDir, { withFileTypes: true });
+  for (const entry of existing) {
+    if (entry.isDirectory() && entry.name.startsWith(`${prefix}-`)) {
+      fs.rmSync(path.join(skillsDir, entry.name), { recursive: true });
+    }
+  }
+
+  function recurse(currentSrcDir, currentPrefix) {
+    const entries = fs.readdirSync(currentSrcDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const srcPath = path.join(currentSrcDir, entry.name);
+      if (entry.isDirectory()) {
+        recurse(srcPath, `${currentPrefix}-${entry.name}`);
+        continue;
+      }
+
+      if (!entry.name.endsWith('.md')) {
+        continue;
+      }
+
+      const baseName = entry.name.replace('.md', '');
+      const skillName = `${currentPrefix}-${baseName}`;
+      const skillDir = path.join(skillsDir, skillName);
+      fs.mkdirSync(skillDir, { recursive: true });
+
+      let content = fs.readFileSync(srcPath, 'utf8');
+      const globalClaudeRegex = /~\/\.claude\//g;
+      const globalClaudeHomeRegex = /\$HOME\/\.claude\//g;
+      const localClaudeRegex = /\.\/\.claude\//g;
+      content = content.replace(globalClaudeRegex, pathPrefix);
+      content = content.replace(globalClaudeHomeRegex, pathPrefix);
+      content = content.replace(localClaudeRegex, `./${getDirName(runtime)}/`);
+      content = processAttribution(content, getCommitAttribution(runtime));
+      content = convertClaudeToKimiSkill(content, skillName);
+
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), content);
+    }
+  }
+
+  recurse(srcDir, prefix);
+}
+
 /**
  * Copy commands to a flat structure for OpenCode
  * OpenCode expects: command/gsd-help.md (invoked as /gsd-help)
@@ -4073,6 +4312,7 @@ function restoreUserArtifacts(destDir, saved) {
 function copyWithPathReplacement(srcDir, destDir, pathPrefix, runtime, isCommand = false, isGlobal = false) {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
+  const isKimi = runtime === 'kimi';
   const isCodex = runtime === 'codex';
   const isCopilot = runtime === 'copilot';
   const isAntigravity = runtime === 'antigravity';
@@ -4380,6 +4620,7 @@ function validateHookFields(settings) {
 function uninstall(isGlobal, runtime = 'claude') {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
+  const isKimi = runtime === 'kimi';
   const isGemini = runtime === 'gemini';
   const isCodex = runtime === 'codex';
   const isCopilot = runtime === 'copilot';
@@ -4405,6 +4646,7 @@ function uninstall(isGlobal, runtime = 'claude') {
   if (runtime === 'opencode') runtimeLabel = 'OpenCode';
   if (runtime === 'gemini') runtimeLabel = 'Gemini';
   if (runtime === 'kilo') runtimeLabel = 'Kilo';
+  if (runtime === 'kimi') runtimeLabel = 'Kimi';
   if (runtime === 'codex') runtimeLabel = 'Codex';
   if (runtime === 'copilot') runtimeLabel = 'Copilot';
   if (runtime === 'antigravity') runtimeLabel = 'Antigravity';
@@ -4440,7 +4682,7 @@ function uninstall(isGlobal, runtime = 'claude') {
       }
       console.log(`  ${green}✓${reset} Removed GSD commands from command/`);
     }
-  } else if (isCodex || isCursor || isWindsurf || isTrae || isCodebuddy) {
+  } else if (isCodex || isCursor || isWindsurf || isTrae || isCodebuddy || isKimi) {
     // Codex/Cursor/Windsurf/Trae/CodeBuddy: remove skills/gsd-*/SKILL.md skill directories
     const skillsDir = path.join(targetDir, 'skills');
     if (fs.existsSync(skillsDir)) {
@@ -4679,7 +4921,7 @@ function uninstall(isGlobal, runtime = 'claude') {
     }
   }
 
-  // 3. Remove GSD agents (gsd-*.md files only)
+  // 3. Remove GSD agents (gsd-*.md files or gsd-* directories for Kimi)
   const agentsDir = path.join(targetDir, 'agents');
   if (fs.existsSync(agentsDir)) {
     const files = fs.readdirSync(agentsDir);
@@ -4688,6 +4930,14 @@ function uninstall(isGlobal, runtime = 'claude') {
       if (file.startsWith('gsd-') && file.endsWith('.md')) {
         fs.unlinkSync(path.join(agentsDir, file));
         agentCount++;
+      }
+      if (isKimi && file.startsWith('gsd-')) {
+        const agentDirPath = path.join(agentsDir, file);
+        const stat = fs.statSync(agentDirPath);
+        if (stat.isDirectory()) {
+          fs.rmSync(agentDirPath, { recursive: true });
+          agentCount++;
+        }
       }
     }
     if (agentCount > 0) {
@@ -5186,6 +5436,7 @@ function generateManifest(dir, baseDir) {
 function writeManifest(configDir, runtime = 'claude') {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
+  const isKimi = runtime === 'kimi';
   const isGemini = runtime === 'gemini';
   const isCodex = runtime === 'codex';
   const isCopilot = runtime === 'copilot';
@@ -5231,6 +5482,16 @@ function writeManifest(configDir, runtime = 'claude') {
     for (const file of fs.readdirSync(agentsDir)) {
       if (file.startsWith('gsd-') && file.endsWith('.md')) {
         manifest.files['agents/' + file] = fileHash(path.join(agentsDir, file));
+      }
+      if (isKimi && file.startsWith('gsd-')) {
+        const agentDirPath = path.join(agentsDir, file);
+        const stat = fs.statSync(agentDirPath);
+        if (stat.isDirectory()) {
+          const agentHashes = generateManifest(agentDirPath);
+          for (const [rel, hash] of Object.entries(agentHashes)) {
+            manifest.files[`agents/${file}/${rel}`] = hash;
+          }
+        }
       }
     }
   }
@@ -5332,7 +5593,7 @@ function reportLocalPatches(configDir, runtime = 'claude') {
   try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch { return []; }
 
   if (meta.files && meta.files.length > 0) {
-    const reapplyCommand = (runtime === 'opencode' || runtime === 'kilo' || runtime === 'copilot')
+    const reapplyCommand = (runtime === 'opencode' || runtime === 'kilo' || runtime === 'kimi' || runtime === 'copilot')
       ? '/gsd-reapply-patches'
       : runtime === 'codex'
         ? '$gsd-reapply-patches'
@@ -5357,6 +5618,7 @@ function install(isGlobal, runtime = 'claude') {
   const isOpencode = runtime === 'opencode';
   const isGemini = runtime === 'gemini';
   const isKilo = runtime === 'kilo';
+  const isKimi = runtime === 'kimi';
   const isCodex = runtime === 'codex';
   const isCopilot = runtime === 'copilot';
   const isAntigravity = runtime === 'antigravity';
@@ -5398,6 +5660,7 @@ function install(isGlobal, runtime = 'claude') {
   if (isOpencode) runtimeLabel = 'OpenCode';
   if (isGemini) runtimeLabel = 'Gemini';
   if (isKilo) runtimeLabel = 'Kilo';
+  if (isKimi) runtimeLabel = 'Kimi';
   if (isCodex) runtimeLabel = 'Codex';
   if (isCopilot) runtimeLabel = 'Copilot';
   if (isAntigravity) runtimeLabel = 'Antigravity';
@@ -5552,6 +5815,16 @@ function install(isGlobal, runtime = 'claude') {
     // Cline is rules-based — commands are embedded in .clinerules (generated below).
     // No skills/commands directory needed. Engine is installed via copyWithPathReplacement.
     console.log(`  ${green}✓${reset} Cline: commands will be available via .clinerules`);
+  } else if (isKimi) {
+    const skillsDir = path.join(targetDir, 'skills');
+    const gsdSrc = path.join(src, 'commands', 'gsd');
+    copyCommandsAsKimiSkills(gsdSrc, skillsDir, 'gsd', pathPrefix, runtime);
+    const installedSkillNames = listCodexSkillNames(skillsDir);
+    if (installedSkillNames.length > 0) {
+      console.log(`  ${green}✓${reset} Installed ${installedSkillNames.length} skills to skills/`);
+    } else {
+      failures.push('skills/gsd-*');
+    }
   } else if (isGemini) {
     const commandsDir = path.join(targetDir, 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });
@@ -5637,11 +5910,19 @@ function install(isGlobal, runtime = 'claude') {
     const agentsDest = path.join(targetDir, 'agents');
     fs.mkdirSync(agentsDest, { recursive: true });
 
-    // Remove old GSD agents (gsd-*.md) before copying new ones
+    // Remove old GSD agents before copying new ones
     if (fs.existsSync(agentsDest)) {
       for (const file of fs.readdirSync(agentsDest)) {
         if (file.startsWith('gsd-') && file.endsWith('.md')) {
           fs.unlinkSync(path.join(agentsDest, file));
+        }
+        // Kimi agents are directories
+        if (isKimi && file.startsWith('gsd-')) {
+          const agentDirPath = path.join(agentsDest, file);
+          const stat = fs.statSync(agentDirPath);
+          if (stat.isDirectory()) {
+            fs.rmSync(agentDirPath, { recursive: true });
+          }
         }
       }
     }
@@ -5693,6 +5974,16 @@ function install(isGlobal, runtime = 'claude') {
           content = content.replace(/CLAUDE\.md/g, 'QWEN.md');
           content = content.replace(/\bClaude Code\b/g, 'Qwen Code');
           content = content.replace(/\.claude\//g, '.qwen/');
+        } else if (isKimi) {
+          // Kimi agents are split into agent.yaml + system.md + sub.yaml
+          const agentName = entry.name.replace('.md', '');
+          const agentDir = path.join(agentsDest, agentName);
+          fs.mkdirSync(agentDir, { recursive: true });
+          const { agentYaml, systemMd, subYaml } = convertClaudeToKimiAgent(content);
+          fs.writeFileSync(path.join(agentDir, 'agent.yaml'), agentYaml);
+          fs.writeFileSync(path.join(agentDir, 'system.md'), systemMd);
+          fs.writeFileSync(path.join(agentDir, 'sub.yaml'), subYaml);
+          continue; // skip the single-file write below
         }
         const destName = isCopilot ? entry.name.replace('.md', '.agent.md') : entry.name;
         fs.writeFileSync(path.join(agentsDest, destName), content);
@@ -5819,7 +6110,7 @@ function install(isGlobal, runtime = 'claude') {
         const fullPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           scanForLeakedPaths(fullPath);
-        } else if ((entry.name.endsWith('.md') || entry.name.endsWith('.toml')) && entry.name !== 'CHANGELOG.md') {
+        } else if ((entry.name.endsWith('.md') || entry.name.endsWith('.toml') || entry.name.endsWith('.yaml')) && entry.name !== 'CHANGELOG.md') {
           let content;
           try {
             content = fs.readFileSync(fullPath, 'utf8');
@@ -6254,6 +6545,7 @@ function install(isGlobal, runtime = 'claude') {
 function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true, configDir = null) {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
+  const isKimi = runtime === 'kimi';
   const isCodex = runtime === 'codex';
   const isCopilot = runtime === 'copilot';
   const isCursor = runtime === 'cursor';
@@ -6261,7 +6553,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   const isTrae = runtime === 'trae';
   const isCline = runtime === 'cline';
 
-  if (shouldInstallStatusline && !isOpencode && !isKilo && !isCodex && !isCopilot && !isCursor && !isWindsurf && !isTrae) {
+  if (shouldInstallStatusline && !isOpencode && !isKilo && !isKimi && !isCodex && !isCopilot && !isCursor && !isWindsurf && !isTrae) {
     settings.statusLine = {
       type: 'command',
       command: statuslineCommand
@@ -6270,7 +6562,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   }
 
   // Write settings when runtime supports settings.json
-  if (!isCodex && !isCopilot && !isKilo && !isCursor && !isWindsurf && !isTrae && !isCline) {
+  if (!isCodex && !isCopilot && !isKilo && !isKimi && !isCursor && !isWindsurf && !isTrae && !isCline) {
     writeSettings(settingsPath, settings);
   }
 
@@ -6309,6 +6601,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   if (runtime === 'opencode') program = 'OpenCode';
   if (runtime === 'gemini') program = 'Gemini';
   if (runtime === 'kilo') program = 'Kilo';
+  if (runtime === 'kimi') program = 'Kimi';
   if (runtime === 'codex') program = 'Codex';
   if (runtime === 'copilot') program = 'Copilot';
   if (runtime === 'antigravity') program = 'Antigravity';
@@ -6322,6 +6615,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   let command = '/gsd-new-project';
   if (runtime === 'opencode') command = '/gsd-new-project';
   if (runtime === 'kilo') command = '/gsd-new-project';
+  if (runtime === 'kimi') command = '/gsd-new-project';
   if (runtime === 'codex') command = '$gsd-new-project';
   if (runtime === 'copilot') command = '/gsd-new-project';
   if (runtime === 'antigravity') command = '/gsd-new-project';
@@ -6422,9 +6716,10 @@ function promptRuntime(callback) {
     '11': 'opencode',
     '12': 'qwen',
     '13': 'trae',
-    '14': 'windsurf'
+    '14': 'windsurf',
+    '15': 'kimi'
   };
-  const allRuntimes = ['claude', 'antigravity', 'augment', 'cline', 'codebuddy', 'codex', 'copilot', 'cursor', 'gemini', 'kilo', 'opencode', 'qwen', 'trae', 'windsurf'];
+  const allRuntimes = ['claude', 'antigravity', 'augment', 'cline', 'codebuddy', 'codex', 'copilot', 'cursor', 'gemini', 'kilo', 'opencode', 'qwen', 'trae', 'windsurf', 'kimi'];
 
   console.log(`  ${yellow}Which runtime(s) would you like to install for?${reset}\n\n  ${cyan}1${reset}) Claude Code  ${dim}(~/.claude)${reset}
   ${cyan}2${reset}) Antigravity  ${dim}(~/.gemini/antigravity)${reset}
@@ -6440,7 +6735,8 @@ function promptRuntime(callback) {
   ${cyan}12${reset}) Qwen Code    ${dim}(~/.qwen)${reset}
   ${cyan}13${reset}) Trae         ${dim}(~/.trae)${reset}
   ${cyan}14${reset}) Windsurf     ${dim}(~/.codeium/windsurf)${reset}
-  ${cyan}15${reset}) All
+  ${cyan}15${reset}) Kimi         ${dim}(~/.kimi)${reset}
+  ${cyan}16${reset}) All
 
   ${dim}Select multiple: 1,2,6 or 1 2 6${reset}
 `);
@@ -6451,7 +6747,7 @@ function promptRuntime(callback) {
     const input = answer.trim() || '1';
 
     // "All" shortcut
-    if (input === '15') {
+    if (input === '16') {
       callback(allRuntimes);
       return;
     }
@@ -6618,6 +6914,8 @@ if (process.env.GSD_TEST_MODE) {
     copyCommandsAsCodebuddySkills,
     convertClaudeToCliineMarkdown,
     convertClaudeAgentToClineAgent,
+    convertClaudeToKimiSkill,
+    convertClaudeToKimiAgent,
     writeManifest,
     reportLocalPatches,
     validateHookFields,

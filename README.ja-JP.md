@@ -4,7 +4,7 @@
 
 [English](README.md) · [Português](README.pt-BR.md) · [简体中文](README.zh-CN.md) · **日本語**
 
-**Claude Code、OpenCode、Gemini CLI、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae、Cline向けの軽量かつ強力なメタプロンプティング、コンテキストエンジニアリング、仕様駆動開発システム。**
+**Claude Code、OpenCode、Gemini CLI、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae、Kimi、Cline向けの軽量かつ強力なメタプロンプティング、コンテキストエンジニアリング、仕様駆動開発システム。**
 
 **コンテキストロット（Claudeがコンテキストウィンドウを消費するにつれ品質が劣化する現象）を解決します。**
 
@@ -99,7 +99,7 @@ npx get-shit-done-cc@latest
 
 確認方法：
 - Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
+- OpenCode / Kilo / Augment / Trae / Kimi: `/gsd-help`
 - Codex: `$gsd-help`
 - Cline: GSDは`.clinerules`経由でインストール — `.clinerules`の存在を確認
 
@@ -163,12 +163,16 @@ npx get-shit-done-cc --trae --local         # ./.trae/ にインストール
 npx get-shit-done-cc --cline --global       # ~/.cline/ にインストール
 npx get-shit-done-cc --cline --local        # ./.clinerules にインストール
 
+# Kimi
+npx get-shit-done-cc --kimi --global        # ~/.kimi/ にインストール
+npx get-shit-done-cc --kimi --local         # ./.kimi/ にインストール
+
 # 全ランタイム
 npx get-shit-done-cc --all --global      # すべてのディレクトリにインストール
 ```
 
 `--global`（`-g`）または `--local`（`-l`）でインストール先の質問をスキップできます。
-`--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex`、`--copilot`、`--cursor`、`--windsurf`、`--antigravity`、`--augment`、`--trae`、`--cline`、または `--all` でランタイムの質問をスキップできます。
+`--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex`、`--copilot`、`--cursor`、`--windsurf`、`--antigravity`、`--augment`、`--trae`、`--cline`、`--kimi`、または `--all` でランタイムの質問をスキップできます。
 
 </details>
 

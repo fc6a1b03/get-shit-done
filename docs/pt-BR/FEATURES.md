@@ -57,7 +57,7 @@ Para catálogo completo e detalhamento exaustivo, consulte [FEATURES.md em ingl�
 - **`--diagnose` flag** — modo diagnóstico sem modificações no `/gsd-debug` (v1.32)
 - **`/gsd-analyze-dependencies`** — detecta dependências entre fases (v1.32)
 - **Response language config** — `response_language` para saída consistente em idioma (v1.32)
-- **Novos runtimes** — Trae IDE, Cline, Augment Code (v1.32)
+- **Novos runtimes** — Trae IDE, Kimi, Cline, Augment Code (v1.32)
 - **Manual update** — procedimento de atualização sem npm (v1.32)
 
 ---
