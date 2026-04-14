@@ -6093,41 +6093,41 @@ function install(isGlobal, runtime = 'claude') {
   reportLocalPatches(targetDir, runtime);
 
   // Verify no leaked .claude paths in non-Claude runtimes
+  // Only scan files that GSD actually installed (via manifest) to avoid false
+  // positives from runtime-native files such as Kimi plans or user notes.
   if (runtime !== 'claude') {
     const leakedPaths = [];
-    function scanForLeakedPaths(dir) {
-      if (!fs.existsSync(dir)) return;
-      let entries;
+    const manifestPath = path.join(targetDir, MANIFEST_NAME);
+    if (fs.existsSync(manifestPath)) {
+      let manifest;
       try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch (err) {
-        if (err.code === 'EPERM' || err.code === 'EACCES') {
-          return; // skip inaccessible directories
-        }
-        throw err;
+        manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      } catch {
+        manifest = { files: {} };
       }
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          scanForLeakedPaths(fullPath);
-        } else if ((entry.name.endsWith('.md') || entry.name.endsWith('.toml') || entry.name.endsWith('.yaml')) && entry.name !== 'CHANGELOG.md') {
+      for (const relPath of Object.keys(manifest.files || {})) {
+        const baseName = path.basename(relPath);
+        if (
+          (baseName.endsWith('.md') || baseName.endsWith('.toml') || baseName.endsWith('.yaml')) &&
+          baseName !== 'CHANGELOG.md'
+        ) {
+          const fullPath = path.join(targetDir, relPath);
           let content;
           try {
             content = fs.readFileSync(fullPath, 'utf8');
           } catch (err) {
             if (err.code === 'EPERM' || err.code === 'EACCES') {
-              continue; // skip inaccessible files
+              continue;
             }
             throw err;
           }
           const matches = content.match(/(?:~|\$HOME)\/\.claude\b/g);
           if (matches) {
-            leakedPaths.push({ file: fullPath.replace(targetDir + '/', ''), count: matches.length });
+            leakedPaths.push({ file: relPath, count: matches.length });
           }
         }
       }
     }
-    scanForLeakedPaths(targetDir);
     if (leakedPaths.length > 0) {
       const totalLeaks = leakedPaths.reduce((sum, l) => sum + l.count, 0);
       console.warn(`\n  ${yellow}⚠${reset}  Found ${totalLeaks} unreplaced .claude path reference(s) in ${leakedPaths.length} file(s):`);
