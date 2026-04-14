@@ -5674,6 +5674,17 @@ function install(isGlobal, runtime = 'claude') {
 
   console.log(`  Installing for ${cyan}${runtimeLabel}${reset} to ${cyan}${locationLabel}${reset}\n`);
 
+  // Detect previous installation version for install/update/no-op messaging
+  let previousVersion = null;
+  const existingVersionFile = path.join(targetDir, 'get-shit-done', 'VERSION');
+  if (fs.existsSync(existingVersionFile)) {
+    try {
+      previousVersion = fs.readFileSync(existingVersionFile, 'utf8').trim() || null;
+    } catch {
+      previousVersion = null;
+    }
+  }
+
   // Track installation failures
   const failures = [];
 
@@ -6209,7 +6220,7 @@ function install(isGlobal, runtime = 'claude') {
       console.warn(`  ${yellow}⚠${reset}  Could not configure Codex hooks: ${e.message}`);
     }
 
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   if (isCopilot) {
@@ -6222,22 +6233,22 @@ function install(isGlobal, runtime = 'claude') {
       console.log(`  ${green}✓${reset} Generated copilot-instructions.md`);
     }
     // Copilot: no settings.json, no hooks, no statusline (like Codex)
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   if (isCursor) {
     // Cursor uses skills — no config.toml, no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   if (isWindsurf) {
     // Windsurf uses skills — no config.toml, no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   if (isTrae) {
     // Trae uses skills — no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   if (isCline) {
@@ -6257,7 +6268,7 @@ function install(isGlobal, runtime = 'claude') {
     ].join('\n') + '\n';
     fs.writeFileSync(clinerulesDest, clinerules);
     console.log(`  ${green}✓${reset} Wrote .clinerules`);
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
 
   // Configure statusline and hooks in settings.json
@@ -6267,7 +6278,7 @@ function install(isGlobal, runtime = 'claude') {
   const rawSettings = readSettings(settingsPath);
   if (rawSettings === null) {
     console.log('  ' + yellow + 'i' + reset + '  Skipping settings.json configuration — file could not be parsed (comments or malformed JSON). Your existing settings are preserved.');
-    return;
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
   }
   const settings = validateHookFields(cleanupOrphanedHooks(rawSettings));
   // Local installs anchor paths to $CLAUDE_PROJECT_DIR so hooks resolve
@@ -6542,7 +6553,7 @@ function install(isGlobal, runtime = 'claude') {
 /**
  * Apply statusline config, then print completion message
  */
-function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true, configDir = null) {
+function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true, configDir = null, previousVersion = null) {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
   const isKimi = runtime === 'kimi';
@@ -6625,8 +6636,17 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   if (runtime === 'trae') command = '/gsd-new-project';
   if (runtime === 'cline') command = '/gsd-new-project';
   if (runtime === 'qwen') command = '/gsd-new-project';
+  let actionMessage;
+  if (!previousVersion) {
+    actionMessage = `Installed successfully!`;
+  } else if (previousVersion === pkg.version) {
+    actionMessage = `Already up to date (v${pkg.version}). No changes needed.`;
+  } else {
+    actionMessage = `Updated successfully from v${previousVersion} to v${pkg.version}`;
+  }
+
   console.log(`
-  ${green}Done!${reset} Open a blank directory in ${program} and run ${cyan}${command}${reset}.
+  ${green}${actionMessage}${reset} Open a blank directory in ${program} and run ${cyan}${command}${reset}.
 
   ${cyan}Join the community:${reset} https://discord.gg/mYgfVNfA2r
 `);
@@ -6837,7 +6857,8 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
           useStatusline,
           result.runtime,
           isGlobal,
-          result.configDir
+          result.configDir,
+          result.previousVersion
         );
       }
     };
