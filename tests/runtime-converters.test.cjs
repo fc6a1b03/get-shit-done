@@ -18,6 +18,8 @@ const {
   convertClaudeToOpencodeFrontmatter,
   convertClaudeToKiloFrontmatter,
   convertClaudeToGeminiAgent,
+  convertClaudeToKimiSkill,
+  convertClaudeToKimiAgent,
   neutralizeAgentReferences,
 } = require('../bin/install.js');
 
@@ -221,6 +223,123 @@ Use \${PHASE} in shell examples.
     assert.ok(!frontmatter.includes('gsd-mapper-workflow'), 'drops skills list items');
     assert.ok(result.includes('$PHASE'), 'escapes ${PHASE} shell variable for Gemini');
     assert.ok(!result.includes('${PHASE}'), 'removes Gemini template-string pattern');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Kimi CLI conversion tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('convertClaudeToKimiSkill', () => {
+  test('keeps name and description, adds type: standard', () => {
+    const input = `---
+name: gsd-execute-phase
+description: Execute all plans in a phase
+allowed-tools:
+  - Read
+  - Bash
+---
+
+Execute the phase plan.`;
+
+    const result = convertClaudeToKimiSkill(input, 'gsd-execute-phase');
+    const frontmatter = result.split('---')[1] || '';
+    assert.ok(frontmatter.includes('name: gsd-execute-phase'), 'keeps skill name');
+    assert.ok(frontmatter.includes('description:'), 'keeps description field');
+    assert.ok(frontmatter.includes('Execute all plans in a phase'), 'keeps description value');
+    assert.ok(frontmatter.includes('type: standard'), 'adds type: standard');
+    assert.ok(!frontmatter.includes('allowed-tools:'), 'strips allowed-tools');
+    assert.ok(result.includes('Execute the phase plan.'), 'preserves body');
+  });
+
+  test('maps tool names in body', () => {
+    const input = `---
+name: gsd-test
+description: Test
+---
+
+Use Bash() to run shell commands, Read() for files, Edit() to modify them, and Task() for subagents.`;
+
+    const result = convertClaudeToKimiSkill(input, 'gsd-test');
+    assert.ok(result.includes('Shell()'), 'Bash -> Shell');
+    assert.ok(result.includes('ReadFile()'), 'Read -> ReadFile');
+    assert.ok(result.includes('StrReplaceFile()'), 'Edit -> StrReplaceFile');
+    assert.ok(result.includes('Agent()'), 'Task -> Agent');
+  });
+
+  test('replaces Claude paths with Kimi paths', () => {
+    const input = `---
+name: gsd-test
+description: Test
+---
+
+Check ~/.claude/settings.json and ./.claude/hooks/gsd-statusline.js.`;
+
+    const result = convertClaudeToKimiSkill(input, 'gsd-test');
+    assert.ok(result.includes('~/.kimi/settings.json'), 'replaces ~/.claude with ~/.kimi');
+    assert.ok(result.includes('./.kimi/hooks/gsd-statusline.js'), 'replaces ./.claude/ with ./.kimi/');
+  });
+});
+
+describe('convertClaudeToKimiAgent', () => {
+  test('splits agent into agent.yaml + system.md + sub.yaml', () => {
+    const input = `---
+name: gsd-executor
+description: Executes GSD plans
+tools: Read, Bash, Task
+---
+
+<role>
+You are a GSD executor.
+</role>`;
+
+    const { agentYaml, systemMd, subYaml } = convertClaudeToKimiAgent(input);
+
+    assert.ok(agentYaml.includes('name: gsd-executor'), 'agent.yaml has name');
+    assert.ok(agentYaml.includes('system_prompt_path: ./system.md'), 'agent.yaml has system_prompt_path');
+    assert.ok(agentYaml.includes('kimi_cli.tools.file:ReadFile'), 'agent.yaml maps Read tool');
+    assert.ok(agentYaml.includes('kimi_cli.tools.shell:Shell'), 'agent.yaml maps Bash tool');
+    assert.ok(agentYaml.includes('kimi_cli.tools.multiagent:Task'), 'agent.yaml maps Task tool');
+
+    assert.ok(systemMd.includes('<role>'), 'system.md preserves body');
+    assert.ok(systemMd.includes('You are a GSD executor.'), 'system.md preserves content');
+
+    assert.ok(subYaml.includes('extend: ./agent.yaml'), 'sub.yaml extends agent.yaml');
+    assert.ok(subYaml.includes('kimi_cli.tools.multiagent:Task'), 'sub.yaml excludes Task');
+    assert.ok(subYaml.includes('kimi_cli.tools.multiagent:CreateSubagent'), 'sub.yaml excludes CreateSubagent');
+    assert.ok(subYaml.includes('subagents: {}'), 'sub.yaml has empty subagents');
+  });
+
+  test('deduplicates mapped tools', () => {
+    const input = `---
+name: gsd-test
+description: Test
+tools: Read, Read, Bash, Bash
+---
+
+Body.`;
+
+    const { agentYaml } = convertClaudeToKimiAgent(input);
+    const readMatches = agentYaml.match(/kimi_cli\.tools\.file:ReadFile/g);
+    assert.strictEqual(readMatches.length, 1, 'ReadFile appears exactly once');
+    const bashMatches = agentYaml.match(/kimi_cli\.tools\.shell:Shell/g);
+    assert.strictEqual(bashMatches.length, 1, 'Shell appears exactly once');
+  });
+
+  test('drops unsupported tools without throwing', () => {
+    const input = `---
+name: gsd-test
+description: Test
+tools: Read, TodoWrite, AskUserQuestion, UnknownTool
+---
+
+Body.`;
+
+    const { agentYaml } = convertClaudeToKimiAgent(input);
+    assert.ok(agentYaml.includes('kimi_cli.tools.file:ReadFile'), 'keeps supported tool');
+    assert.ok(!agentYaml.includes('TodoWrite'), 'drops unsupported TodoWrite');
+    assert.ok(!agentYaml.includes('AskUserQuestion'), 'drops unsupported AskUserQuestion');
+    assert.ok(!agentYaml.includes('UnknownTool'), 'drops unknown tool');
   });
 });
 

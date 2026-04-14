@@ -4,7 +4,7 @@
 
 [English](README.md) · [Português](README.pt-BR.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · **한국어**
 
-**Claude Code, OpenCode, Gemini CLI, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Cline을 위한 가볍고 강력한 메타 프롬프팅, 컨텍스트 엔지니어링, 스펙 기반 개발 시스템.**
+**Claude Code, OpenCode, Gemini CLI, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Kimi, Cline을 위한 가볍고 강력한 메타 프롬프팅, 컨텍스트 엔지니어링, 스펙 기반 개발 시스템.**
 
 **컨텍스트 rot를 해결합니다 — Claude의 컨텍스트 창이 채워질수록 품질이 저하되는 문제.**
 
@@ -99,7 +99,7 @@ npx get-shit-done-cc@latest
 
 설치가 됐는지 확인하려면:
 - Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
+- OpenCode / Kilo / Augment / Trae / Kimi: `/gsd-help`
 - Codex: `$gsd-help`
 - Cline: GSD는 `.clinerules`를 통해 설치 — `.clinerules` 존재 여부 확인
 
@@ -163,12 +163,16 @@ npx get-shit-done-cc --trae --local         # ./.trae/에 설치
 npx get-shit-done-cc --cline --global       # ~/.cline/에 설치
 npx get-shit-done-cc --cline --local        # ./.clinerules에 설치
 
+# Kimi
+npx get-shit-done-cc --kimi --global        # ~/.kimi/에 설치
+npx get-shit-done-cc --kimi --local         # ./.kimi/에 설치
+
 # 전체 런타임
 npx get-shit-done-cc --all --global      # 모든 디렉터리에 설치
 ```
 
 위치 프롬프트 건너뛰기: `--global` (`-g`) 또는 `--local` (`-l`).
-런타임 프롬프트 건너뛰기: `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline`, 또는 `--all`.
+런타임 프롬프트 건너뛰기: `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline`, `--kimi`, 또는 `--all`.
 
 </details>
 

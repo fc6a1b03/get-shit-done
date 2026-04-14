@@ -2,7 +2,7 @@
 
 # GET SHIT DONE
 
-**一个轻量级且强大的元提示、上下文工程和规格驱动开发系统，支持 Claude Code、OpenCode、Gemini CLI、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae 和 Cline。**
+**一个轻量级且强大的元提示、上下文工程和规格驱动开发系统，支持 Claude Code、OpenCode、Gemini CLI、Kilo、Codex、Copilot、Cursor、Windsurf、Antigravity、Augment、Trae、Kimi 和 Cline。**
 
 **解决上下文衰减 —— 即 Claude 填充上下文窗口时发生的质量退化问题。**
 
@@ -82,13 +82,14 @@ npx get-shit-done-cc@latest
 ```
 
 安装程序会提示你选择：
-1. **运行时** —— Claude Code、OpenCode、Gemini、Kilo、Codex 或全部
+1. **运行时** —— Claude Code、OpenCode、Gemini、Kilo、Codex、Kimi 或全部
 2. **位置** —— 全局（所有项目）或本地（仅当前项目）
 
 验证安装：
 - Claude Code / Gemini: `/gsd-help`
 - OpenCode: `/gsd-help`
 - Kilo: `/gsd-help`
+- Kimi: `/gsd-help`
 - Codex: `$gsd-help`
 
 > [!NOTE]
@@ -124,12 +125,16 @@ npx get-shit-done-cc --kilo --local      # 安装到 ./.kilo/
 npx get-shit-done-cc --codex --global    # 安装到 ~/.codex/
 npx get-shit-done-cc --codex --local     # 安装到 ./.codex/
 
+# Kimi
+npx get-shit-done-cc --kimi --global     # 安装到 ~/.kimi/
+npx get-shit-done-cc --kimi --local      # 安装到 ./.kimi/
+
 # 所有运行时
 npx get-shit-done-cc --all --global      # 安装到所有目录
 ```
 
 使用 `--global`（`-g`）或 `--local`（`-l`）跳过位置提示。
-使用 `--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex` 或 `--all` 跳过运行时提示。
+使用 `--claude`、`--opencode`、`--gemini`、`--kilo`、`--codex`、`--kimi` 或 `--all` 跳过运行时提示。
 
 </details>
 

@@ -4,7 +4,7 @@
 
 [English](README.md) · **Português** · [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md)
 
-**Um sistema leve e poderoso de meta-prompting, engenharia de contexto e desenvolvimento orientado a especificação para Claude Code, OpenCode, Gemini CLI, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae e Cline.**
+**Um sistema leve e poderoso de meta-prompting, engenharia de contexto e desenvolvimento orientado a especificação para Claude Code, OpenCode, Gemini CLI, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Kimi e Cline.**
 
 **Resolve context rot — a degradação de qualidade que acontece conforme o Claude enche a janela de contexto.**
 
@@ -81,7 +81,7 @@ Quality gates embutidos capturam problemas reais: detecção de schema drift sin
 - **Filtro de escopo do verificador** — Lacunas abordadas em fases posteriores são marcadas como "adiadas", não como lacunas
 - **Guard de leitura antes de edição** — Hook consultivo previne loops de retry infinitos em runtimes não-Claude
 - **Redução de contexto** — Truncamento de Markdown e ordenação de prompts cache-friendly para menor uso de tokens
-- **4 novos runtimes** — Trae, Kilo, Augment e Cline (12 runtimes no total)
+- **Novos runtimes** — Trae, Kimi, Kilo, Augment e Cline
 
 ---
 
@@ -92,12 +92,12 @@ npx get-shit-done-cc@latest
 ```
 
 O instalador pede:
-1. **Runtime** — Claude Code, OpenCode, Gemini, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Cline, ou todos
+1. **Runtime** — Claude Code, OpenCode, Gemini, Kilo, Codex, Copilot, Cursor, Windsurf, Antigravity, Augment, Trae, Cline, Kimi, ou todos
 2. **Local** — Global (todos os projetos) ou local (apenas projeto atual)
 
 Verifique com:
 - Claude Code / Gemini / Copilot / Antigravity: `/gsd-help`
-- OpenCode / Kilo / Augment / Trae: `/gsd-help`
+- OpenCode / Kilo / Augment / Trae / Kimi: `/gsd-help`
 - Codex: `$gsd-help`
 - Cline: GSD instala via `.clinerules` — verifique se `.clinerules` existe
 
@@ -159,12 +159,16 @@ npx get-shit-done-cc --trae --local         # Install to ./.trae/
 npx get-shit-done-cc --cline --global       # Install to ~/.cline/
 npx get-shit-done-cc --cline --local        # Install to ./.clinerules
 
+# Kimi
+npx get-shit-done-cc --kimi --global        # Install to ~/.kimi/
+npx get-shit-done-cc --kimi --local         # Install to ./.kimi/
+
 # Todos
 npx get-shit-done-cc --all --global
 ```
 
 Use `--global` (`-g`) ou `--local` (`-l`) para pular a pergunta de local.
-Use `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline` ou `--all` para pular a pergunta de runtime.
+Use `--claude`, `--opencode`, `--gemini`, `--kilo`, `--codex`, `--copilot`, `--cursor`, `--windsurf`, `--antigravity`, `--augment`, `--trae`, `--cline`, `--kimi` ou `--all` para pular a pergunta de runtime.
 
 </details>
 

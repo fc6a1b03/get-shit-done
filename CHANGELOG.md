@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Kimi runtime support** — First-class Kimi CLI runtime support. Installs skills to `~/.kimi/skills/gsd-*/SKILL.md` and agents to `~/.kimi/agents/gsd-*/` as `agent.yaml` + `system.md` + `sub.yaml`. Maps Claude tool names to `kimi_cli.tools.*` namespace. `--kimi` flag with `KIMI_CONFIG_DIR` env var support.
 - **`@gsd-build/sdk` — Phase 1 typed query foundation** — Registry-based `gsd-sdk query` command, classified errors (`GSDQueryError`), and unit-tested handlers under `sdk/src/query/` (state, roadmap, phase lifecycle, init, config, validation, and related domains). Implements incremental SDK-first migration scope approved in #2083; builds on validated work from #2007 / `feat/sdk-foundation` without migrating workflows or removing `gsd-tools.cjs` in this phase.
 - **Flow diagram directive for phase researcher** — `gsd-phase-researcher` now enforces data-flow architecture diagrams instead of file-listing diagrams. Language-agnostic directive added to agent prompt and research template. (#2139)
 
