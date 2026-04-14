@@ -5521,6 +5521,29 @@ function writeManifest(configDir, runtime = 'claude') {
 }
 
 /**
+ * Compare old and new manifests to determine install status.
+ * @returns {'install' | 'update' | 'noop'}
+ */
+function computeInstallStatus(installStatus, newManifest) {
+  if (!installStatus || !installStatus.files) {
+    return 'install';
+  }
+  const oldFiles = installStatus.files || {};
+  const newFiles = newManifest.files || {};
+  const oldKeys = Object.keys(oldFiles);
+  const newKeys = Object.keys(newFiles);
+  if (oldKeys.length !== newKeys.length) {
+    return 'update';
+  }
+  for (const key of newKeys) {
+    if (oldFiles[key] !== newFiles[key]) {
+      return 'update';
+    }
+  }
+  return 'noop';
+}
+
+/**
  * Detect user-modified GSD files by comparing against install manifest.
  * Backs up modified files to gsd-local-patches/ for reapply after update.
  * Also saves pristine copies (from manifest) to gsd-pristine/ to enable
@@ -5674,14 +5697,14 @@ function install(isGlobal, runtime = 'claude') {
 
   console.log(`  Installing for ${cyan}${runtimeLabel}${reset} to ${cyan}${locationLabel}${reset}\n`);
 
-  // Detect previous installation version for install/update/no-op messaging
-  let previousVersion = null;
-  const existingVersionFile = path.join(targetDir, 'get-shit-done', 'VERSION');
-  if (fs.existsSync(existingVersionFile)) {
+  // Detect install/update/no-op by comparing against previous manifest
+  let oldManifest = null;
+  const existingManifestPath = path.join(targetDir, MANIFEST_NAME);
+  if (fs.existsSync(existingManifestPath)) {
     try {
-      previousVersion = fs.readFileSync(existingVersionFile, 'utf8').trim() || null;
+      oldManifest = JSON.parse(fs.readFileSync(existingManifestPath, 'utf8'));
     } catch {
-      previousVersion = null;
+      oldManifest = null;
     }
   }
 
@@ -6097,7 +6120,8 @@ function install(isGlobal, runtime = 'claude') {
   }
 
   // Write file manifest for future modification detection
-  writeManifest(targetDir, runtime);
+  const newManifest = writeManifest(targetDir, runtime);
+  const installStatus = computeInstallStatus(oldManifest, newManifest);
   console.log(`  ${green}✓${reset} Wrote file manifest (${MANIFEST_NAME})`);
 
   // Report any backed-up local patches
@@ -6220,7 +6244,7 @@ function install(isGlobal, runtime = 'claude') {
       console.warn(`  ${yellow}⚠${reset}  Could not configure Codex hooks: ${e.message}`);
     }
 
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   if (isCopilot) {
@@ -6233,22 +6257,22 @@ function install(isGlobal, runtime = 'claude') {
       console.log(`  ${green}✓${reset} Generated copilot-instructions.md`);
     }
     // Copilot: no settings.json, no hooks, no statusline (like Codex)
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   if (isCursor) {
     // Cursor uses skills — no config.toml, no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   if (isWindsurf) {
     // Windsurf uses skills — no config.toml, no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   if (isTrae) {
     // Trae uses skills — no settings.json hooks needed
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   if (isCline) {
@@ -6268,7 +6292,7 @@ function install(isGlobal, runtime = 'claude') {
     ].join('\n') + '\n';
     fs.writeFileSync(clinerulesDest, clinerules);
     console.log(`  ${green}✓${reset} Wrote .clinerules`);
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
   // Configure statusline and hooks in settings.json
@@ -6278,7 +6302,7 @@ function install(isGlobal, runtime = 'claude') {
   const rawSettings = readSettings(settingsPath);
   if (rawSettings === null) {
     console.log('  ' + yellow + 'i' + reset + '  Skipping settings.json configuration — file could not be parsed (comments or malformed JSON). Your existing settings are preserved.');
-    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, previousVersion };
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
   const settings = validateHookFields(cleanupOrphanedHooks(rawSettings));
   // Local installs anchor paths to $CLAUDE_PROJECT_DIR so hooks resolve
@@ -6547,13 +6571,13 @@ function install(isGlobal, runtime = 'claude') {
     }
   }
 
-  return { settingsPath, settings, statuslineCommand, runtime, configDir: targetDir };
+  return { settingsPath, settings, statuslineCommand, runtime, configDir: targetDir, installStatus };
 }
 
 /**
  * Apply statusline config, then print completion message
  */
-function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true, configDir = null, previousVersion = null) {
+function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true, configDir = null, installStatus = 'install') {
   const isOpencode = runtime === 'opencode';
   const isKilo = runtime === 'kilo';
   const isKimi = runtime === 'kimi';
@@ -6637,12 +6661,12 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   if (runtime === 'cline') command = '/gsd-new-project';
   if (runtime === 'qwen') command = '/gsd-new-project';
   let actionMessage;
-  if (!previousVersion) {
+  if (installStatus === 'install') {
     actionMessage = `Installed successfully!`;
-  } else if (previousVersion === pkg.version) {
-    actionMessage = `Already up to date (v${pkg.version}). No changes needed.`;
+  } else if (installStatus === 'noop') {
+    actionMessage = `Already up to date. No changes needed.`;
   } else {
-    actionMessage = `Updated successfully from v${previousVersion} to v${pkg.version}`;
+    actionMessage = `Updated successfully!`;
   }
 
   console.log(`
@@ -6858,7 +6882,7 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
           result.runtime,
           isGlobal,
           result.configDir,
-          result.previousVersion
+          result.installStatus
         );
       }
     };
