@@ -6295,6 +6295,82 @@ function install(isGlobal, runtime = 'claude') {
     return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
   }
 
+  if (isKimi) {
+    // Kimi uses config.toml for hooks (similar to Codex but simpler — no feature flag needed)
+    const configPath = path.join(targetDir, 'config.toml');
+    try {
+      let configContent = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : '';
+      const eol = detectLineEnding(configContent);
+      let added = false;
+
+      function addKimiHook(event, matcher, command) {
+        const hookBlock = `${eol}[[hooks]]${eol}event = "${event}"${eol}${matcher ? `matcher = "${matcher}"${eol}` : ''}command = "${command}"${eol}`;
+        if (!configContent.includes(command)) {
+          configContent += hookBlock;
+          return true;
+        }
+        return false;
+      }
+
+      const hooksDir = path.join(targetDir, 'hooks');
+
+      // SessionStart: update check
+      const checkUpdateScript = path.resolve(hooksDir, 'gsd-check-update.js').replace(/\\/g, '/');
+      if (fs.existsSync(checkUpdateScript) && addKimiHook('SessionStart', '', `node ${checkUpdateScript}`)) {
+        added = true;
+      }
+
+      // SessionStart: session state orientation (opt-in via config)
+      const sessionStateScript = path.resolve(hooksDir, 'gsd-session-state.sh').replace(/\\/g, '/');
+      if (fs.existsSync(sessionStateScript) && addKimiHook('SessionStart', '', `bash ${sessionStateScript}`)) {
+        added = true;
+      }
+
+      // PreToolUse: prompt injection guard
+      const promptGuardScript = path.resolve(hooksDir, 'gsd-prompt-guard.js').replace(/\\/g, '/');
+      if (fs.existsSync(promptGuardScript) && addKimiHook('PreToolUse', 'WriteFile|StrReplaceFile', `node ${promptGuardScript}`)) {
+        added = true;
+      }
+
+      // PreToolUse: read-before-edit guard
+      const readGuardScript = path.resolve(hooksDir, 'gsd-read-guard.js').replace(/\\/g, '/');
+      if (fs.existsSync(readGuardScript) && addKimiHook('PreToolUse', 'WriteFile|StrReplaceFile', `node ${readGuardScript}`)) {
+        added = true;
+      }
+
+      // PreToolUse: workflow guard (opt-in via config)
+      const workflowGuardScript = path.resolve(hooksDir, 'gsd-workflow-guard.js').replace(/\\/g, '/');
+      if (fs.existsSync(workflowGuardScript) && addKimiHook('PreToolUse', 'WriteFile|StrReplaceFile', `node ${workflowGuardScript}`)) {
+        added = true;
+      }
+
+      // PreToolUse: commit validation (opt-in via config)
+      const validateCommitScript = path.resolve(hooksDir, 'gsd-validate-commit.sh').replace(/\\/g, '/');
+      if (fs.existsSync(validateCommitScript) && addKimiHook('PreToolUse', 'Shell', `bash ${validateCommitScript}`)) {
+        added = true;
+      }
+
+      // PreToolUse: phase boundary detection (opt-in via config)
+      const phaseBoundaryScript = path.resolve(hooksDir, 'gsd-phase-boundary.sh').replace(/\\/g, '/');
+      if (fs.existsSync(phaseBoundaryScript) && addKimiHook('PreToolUse', 'WriteFile|StrReplaceFile', `bash ${phaseBoundaryScript}`)) {
+        added = true;
+      }
+
+      // Note: context monitor is not registered for Kimi because it depends on
+      // the statusline bridge file (/tmp/claude-ctx-...), which is written by
+      // the Claude-specific statusLine hook. Kimi does not have a statusline event.
+
+      fs.writeFileSync(configPath, configContent, 'utf-8');
+      if (added) {
+        console.log(`  ${green}✓${reset} Configured Kimi hooks`);
+      }
+    } catch (e) {
+      console.warn(`  ${yellow}⚠${reset}  Could not configure Kimi hooks: ${e.message}`);
+    }
+
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime, configDir: targetDir, installStatus };
+  }
+
   // Configure statusline and hooks in settings.json
   // Gemini and Antigravity use AfterTool instead of PostToolUse for post-tool hooks
   const postToolEvent = (runtime === 'gemini' || runtime === 'antigravity') ? 'AfterTool' : 'PostToolUse';

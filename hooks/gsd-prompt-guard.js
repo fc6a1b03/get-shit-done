@@ -42,8 +42,8 @@ process.stdin.on('end', () => {
     const data = JSON.parse(input);
     const toolName = data.tool_name;
 
-    // Only scan Write and Edit operations
-    if (toolName !== 'Write' && toolName !== 'Edit') {
+    // Only scan Write and Edit operations (Kimi uses WriteFile / StrReplaceFile)
+    if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'WriteFile' && toolName !== 'StrReplaceFile') {
       process.exit(0);
     }
 
