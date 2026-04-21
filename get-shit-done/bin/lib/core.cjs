@@ -263,6 +263,9 @@ const CONFIG_DEFAULTS = {
   phase_naming: 'sequential', // 'sequential' (default, auto-increment) or 'custom' (arbitrary string IDs)
   project_code: null, // optional short prefix for phase dirs (e.g., 'CK' → 'CK-01-foundation')
   subagent_timeout: 300000, // 5 min default; increase for large codebases or slower models (ms)
+  security_enforcement: true, // workflow.security_enforcement — threat-model-anchored security verification via /gsd-secure-phase
+  security_asvs_level: 1, // workflow.security_asvs_level — OWASP ASVS verification level (1=opportunistic, 2=standard, 3=comprehensive)
+  security_block_on: 'high', // workflow.security_block_on — minimum severity that blocks phase advancement ('high' | 'medium' | 'low')
 };
 
 function loadConfig(cwd) {
@@ -377,6 +380,9 @@ function loadConfig(cwd) {
       exa_search: get('exa_search') ?? defaults.exa_search,
       tdd_mode: get('tdd_mode', { section: 'workflow', field: 'tdd_mode' }) ?? false,
       text_mode: get('text_mode', { section: 'workflow', field: 'text_mode' }) ?? defaults.text_mode,
+      auto_advance: get('auto_advance', { section: 'workflow', field: 'auto_advance' }) ?? false,
+      _auto_chain_active: get('_auto_chain_active', { section: 'workflow', field: '_auto_chain_active' }) ?? false,
+      mode: get('mode') ?? 'interactive',
       sub_repos: get('sub_repos', { section: 'planning', field: 'sub_repos' }) ?? defaults.sub_repos,
       resolve_model_ids: get('resolve_model_ids') ?? defaults.resolve_model_ids,
       context_window: get('context_window') ?? defaults.context_window,
@@ -388,6 +394,7 @@ function loadConfig(cwd) {
       manager: parsed.manager || {},
       response_language: get('response_language') || null,
       claude_md_path: get('claude_md_path') || null,
+      claude_md_assembly: parsed.claude_md_assembly || null,
     };
   } catch {
     // Fall back to ~/.gsd/defaults.json only for truly pre-project contexts (#1683)
@@ -604,6 +611,98 @@ function resolveWorktreeRoot(cwd) {
   }
 
   return cwd;
+}
+
+/**
+ * Parse `git worktree list --porcelain` output into an array of
+ * { path, branch } objects.  Entries with a detached HEAD (no branch line)
+ * are skipped because we cannot safely reason about their merge status.
+ *
+ * @param {string} porcelain - raw output from git worktree list --porcelain
+ * @returns {{ path: string, branch: string }[]}
+ */
+function parseWorktreePorcelain(porcelain) {
+  const entries = [];
+  let current = null;
+  for (const line of porcelain.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length).trim(), branch: null };
+    } else if (line.startsWith('branch refs/heads/') && current) {
+      current.branch = line.slice('branch refs/heads/'.length).trim();
+    } else if (line === '' && current) {
+      if (current.branch) entries.push(current);
+      current = null;
+    }
+  }
+  // flush last entry if file doesn't end with blank line
+  if (current && current.branch) entries.push(current);
+  return entries;
+}
+
+/**
+ * Remove linked git worktrees whose branch has already been merged into the
+ * current HEAD of the main worktree.  Also runs `git worktree prune` to clear
+ * any stale references left by manually-deleted worktree directories.
+ *
+ * Safe guards:
+ *  - Never removes the main worktree (first entry in --porcelain output).
+ *  - Never removes the worktree at process.cwd().
+ *  - Never removes a worktree whose branch has unmerged commits.
+ *  - Skips detached-HEAD worktrees (no branch name).
+ *
+ * @param {string} repoRoot - absolute path to the main (or any) worktree of
+ *   the repository; used as `cwd` for git commands.
+ * @returns {string[]} list of worktree paths that were removed
+ */
+function pruneOrphanedWorktrees(repoRoot) {
+  const pruned = [];
+  const cwd = process.cwd();
+
+  try {
+    // 1. Get all worktrees in porcelain format
+    const listResult = execGit(repoRoot, ['worktree', 'list', '--porcelain']);
+    if (listResult.exitCode !== 0) return pruned;
+
+    const worktrees = parseWorktreePorcelain(listResult.stdout);
+    if (worktrees.length === 0) {
+      execGit(repoRoot, ['worktree', 'prune']);
+      return pruned;
+    }
+
+    // 2. First entry is the main worktree — never touch it
+    const mainWorktreePath = worktrees[0].path;
+
+    // 3. Check each non-main worktree
+    for (let i = 1; i < worktrees.length; i++) {
+      const { path: wtPath, branch } = worktrees[i];
+
+      // Never remove the worktree for the current process directory
+      if (wtPath === cwd || cwd.startsWith(wtPath + path.sep)) continue;
+
+      // Check if the branch is fully merged into HEAD (main)
+      // git merge-base --is-ancestor <branch> HEAD exits 0 when merged
+      const ancestorCheck = execGit(repoRoot, [
+        'merge-base', '--is-ancestor', branch, 'HEAD',
+      ]);
+
+      if (ancestorCheck.exitCode !== 0) {
+        // Not yet merged — leave it alone
+        continue;
+      }
+
+      // Remove the worktree and delete the branch
+      const removeResult = execGit(repoRoot, ['worktree', 'remove', '--force', wtPath]);
+      if (removeResult.exitCode === 0) {
+        execGit(repoRoot, ['branch', '-D', branch]);
+        pruned.push(wtPath);
+      }
+    }
+  } catch { /* never crash the caller */ }
+
+  // 4. Always run prune to clear stale references (e.g. manually-deleted dirs)
+  execGit(repoRoot, ['worktree', 'prune']);
+
+  return pruned;
 }
 
 /**
@@ -1236,9 +1335,19 @@ function getRoadmapPhaseInternal(cwd, phaseNum) {
 
   try {
     const content = extractCurrentMilestone(fs.readFileSync(roadmapPath, 'utf-8'), cwd);
-    const escapedPhase = escapeRegex(phaseNum.toString());
-    // Match both numeric (Phase 1:) and custom (Phase PROJ-42:) headers
-    const phasePattern = new RegExp(`#{2,4}\\s*Phase\\s+${escapedPhase}:\\s*([^\\n]+)`, 'i');
+    // Strip leading zeros from purely numeric phase numbers so "03" matches "Phase 3:"
+    // in canonical ROADMAP headings. Non-numeric IDs (e.g. "PROJ-42") are kept as-is.
+    const normalized = /^\d+$/.test(String(phaseNum))
+      ? String(phaseNum).replace(/^0+(?=\d)/, '')
+      : String(phaseNum);
+    const escapedPhase = escapeRegex(normalized);
+    // Match both numeric and custom (Phase PROJ-42:) headers.
+    // For purely numeric phases allow optional leading zeros so both "Phase 1:" and
+    // "Phase 01:" are matched regardless of whether the ROADMAP uses padded numbers.
+    const isNumeric = /^\d+$/.test(String(phaseNum));
+    const phasePattern = isNumeric
+      ? new RegExp(`#{2,4}\\s*Phase\\s+0*${escapedPhase}:\\s*([^\\n]+)`, 'i')
+      : new RegExp(`#{2,4}\\s*Phase\\s+${escapedPhase}:\\s*([^\\n]+)`, 'i');
     const headerMatch = content.match(phasePattern);
     if (!headerMatch) return null;
 
@@ -1411,6 +1520,50 @@ function getMilestoneInfo(cwd) {
   try {
     const roadmap = fs.readFileSync(path.join(planningDir(cwd), 'ROADMAP.md'), 'utf-8');
 
+    // 0. Prefer STATE.md milestone: frontmatter as the authoritative source.
+    // This prevents falling through to a regex that may match an old heading
+    // when the active milestone's 🚧 marker is inside a <summary> tag without
+    // **bold** formatting (bug #2409).
+    let stateVersion = null;
+    if (cwd) {
+      try {
+        const statePath = path.join(planningDir(cwd), 'STATE.md');
+        if (fs.existsSync(statePath)) {
+          const stateRaw = fs.readFileSync(statePath, 'utf-8');
+          const m = stateRaw.match(/^milestone:\s*(.+)/m);
+          if (m) stateVersion = m[1].trim();
+        }
+      } catch { /* intentionally empty */ }
+    }
+
+    if (stateVersion) {
+      // Look up the name for this version in ROADMAP.md
+      const escapedVer = escapeRegex(stateVersion);
+      // Match heading-format: ## Roadmap v2.9: Name  or  ## v2.9 Name
+      const headingMatch = roadmap.match(
+        new RegExp(`##[^\\n]*${escapedVer}[:\\s]+([^\\n(]+)`, 'i')
+      );
+      if (headingMatch) {
+        // If the heading line contains ✅ the milestone is already shipped.
+        // Fall through to normal detection so the NEW active milestone is returned
+        // instead of the stale shipped one still recorded in STATE.md.
+        if (!headingMatch[0].includes('✅')) {
+          return { version: stateVersion, name: headingMatch[1].trim() };
+        }
+        // Shipped milestone — do not early-return; fall through to normal detection below.
+      } else {
+        // Match list-format: 🚧 **v2.9 Name** or 🚧 v2.9 Name
+        const listMatch = roadmap.match(
+          new RegExp(`🚧\\s*\\*?\\*?${escapedVer}\\s+([^*\\n]+)`, 'i')
+        );
+        if (listMatch) {
+          return { version: stateVersion, name: listMatch[1].trim() };
+        }
+        // Version found in STATE.md but no name match in ROADMAP — return bare version
+        return { version: stateVersion, name: 'milestone' };
+      }
+    }
+
     // First: check for list-format roadmaps using 🚧 (in-progress) marker
     // e.g. "- 🚧 **v2.1 Belgium** — Phases 24-28 (in progress)"
     // e.g. "- 🚧 **v1.2.1 Tech Debt** — Phases 1-8 (in progress)"
@@ -1422,11 +1575,14 @@ function getMilestoneInfo(cwd) {
       };
     }
 
-    // Second: heading-format roadmaps — strip shipped milestones in <details> blocks
+    // Second: heading-format roadmaps — strip shipped milestones.
+    // <details> blocks are stripped by stripShippedMilestones; heading-format ✅ markers
+    // are excluded by the negative lookahead below so a stale STATE.md version (or any
+    // shipped ✅ heading) never wins over the first non-shipped milestone heading.
     const cleaned = stripShippedMilestones(roadmap);
-    // Extract version and name from the same ## heading for consistency
+    // Negative lookahead skips headings that contain ✅ (shipped milestone marker).
     // Supports 2+ segment versions: v1.2, v1.2.1, v2.0.1, etc.
-    const headingMatch = cleaned.match(/## .*v(\d+(?:\.\d+)+)[:\s]+([^\n(]+)/);
+    const headingMatch = cleaned.match(/## (?!.*✅).*v(\d+(?:\.\d+)+)[:\s]+([^\n(]+)/);
     if (headingMatch) {
       return {
         version: 'v' + headingMatch[1],
@@ -1634,4 +1790,5 @@ module.exports = {
   checkAgentsInstalled,
   atomicWriteFileSync,
   timeAgo,
+  pruneOrphanedWorktrees,
 };

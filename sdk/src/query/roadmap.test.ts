@@ -120,7 +120,40 @@ describe('getMilestoneInfo', () => {
     expect(info.name).toBe('Belgium');
   });
 
-  it('falls back to v1.0 when ROADMAP.md missing', async () => {
+  it('extracts from yellow-circle in-flight marker (GSD ROADMAP template)', async () => {
+    const roadmap = '- 🟡 **v3.1 Upstream Landing** — Phase 15 (in flight)';
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v3.1');
+    expect(info.name).toBe('Upstream Landing');
+  });
+
+  it('uses last **vX.Y Title** in milestone list before ## Phases when no emoji match', async () => {
+    const roadmap = `## Milestones
+
+- ✅ **v1.0 A**
+- ✅ **v3.0 B**
+- ✅ **v3.1 Current Name**
+
+## Phases
+`;
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmap);
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v3.1');
+    expect(info.name).toBe('Current Name');
+  });
+
+  it('falls back to STATE.md milestone when ROADMAP.md is missing', async () => {
+    await writeFile(
+      join(tmpDir, '.planning', 'STATE.md'),
+      '---\nmilestone: v4.2\nmilestone_name: From State\n---\n\n# State\n',
+    );
+    const info = await getMilestoneInfo(tmpDir);
+    expect(info.version).toBe('v4.2');
+    expect(info.name).toBe('From State');
+  });
+
+  it('falls back to v1.0 when ROADMAP.md and STATE.md lack milestone', async () => {
     const info = await getMilestoneInfo(tmpDir);
     expect(info.version).toBe('v1.0');
     expect(info.name).toBe('milestone');
@@ -143,6 +176,57 @@ describe('extractCurrentMilestone', () => {
     // No STATE.md, no in-progress marker
     const result = await extractCurrentMilestone(content, tmpDir);
     expect(result).toBe('current content');
+  });
+
+  // ─── Bug #2422: preamble Backlog leak ─────────────────────────────────
+  it('bug-2422: does not include ## Backlog section before the current milestone', async () => {
+    const roadmapWithBacklog = `# ROADMAP
+
+## Backlog
+### Phase 999.1: Parking lot item A
+### Phase 999.2: Parking lot item B
+
+### 🚧 v2.0 My Milestone (In Progress)
+- [ ] **Phase 100: Real work**
+
+## v2.0 Phase Details
+### Phase 100: Real work
+**Goal**: Do stuff.
+`;
+    const state = `---\nmilestone: v2.0\n---\n# State\n`;
+    await writeFile(join(tmpDir, '.planning', 'STATE.md'), state);
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmapWithBacklog);
+
+    const result = await extractCurrentMilestone(roadmapWithBacklog, tmpDir);
+
+    // Must NOT include backlog phases
+    expect(result).not.toContain('Phase 999.1');
+    expect(result).not.toContain('Phase 999.2');
+    expect(result).not.toContain('Parking lot');
+    // Must include the actual v2.0 content
+    expect(result).toContain('Phase 100');
+  });
+
+  // ─── Bug #2422: same-version sub-heading truncation ───────────────────
+  it('bug-2422: does not truncate at same-version sub-heading (## v2.0 Phase Details)', async () => {
+    const roadmapWithDetails = `# ROADMAP
+
+### 🚧 v2.0 My Milestone (In Progress)
+- [ ] **Phase 100: Real work**
+
+## v2.0 Phase Details
+### Phase 100: Real work
+**Goal**: Do stuff.
+`;
+    const state = `---\nmilestone: v2.0\n---\n# State\n`;
+    await writeFile(join(tmpDir, '.planning', 'STATE.md'), state);
+    await writeFile(join(tmpDir, '.planning', 'ROADMAP.md'), roadmapWithDetails);
+
+    const result = await extractCurrentMilestone(roadmapWithDetails, tmpDir);
+
+    // The detail section must survive — not be cut off
+    expect(result).toContain('Phase 100');
+    expect(result).toContain('Phase Details');
   });
 });
 

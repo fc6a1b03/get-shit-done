@@ -1,8 +1,9 @@
 /**
  * Agent skills query handler — scan installed skill directories.
  *
- * Reads from .claude/skills/, .agents/skills/, .cursor/skills/, .github/skills/,
- * and the global ~/.claude/get-shit-done/skills/ directory.
+ * Reads from project `.claude/skills/`, `.agents/skills/`, `.cursor/skills/`,
+ * `.github/skills/`, `.codex/skills/`, plus managed global `~/.claude/skills/`
+ * and `~/.codex/skills/` roots.
  *
  * @example
  * ```typescript
@@ -10,6 +11,8 @@
  *
  * await agentSkills(['gsd-executor'], '/project');
  * // { data: { agent_type: 'gsd-executor', skills: ['plan', 'verify'], skill_count: 2 } }
+ * await agentSkills([], '/project');
+ * // { data: '' } — matches gsd-tools when no agent type is passed
  * ```
  */
 
@@ -20,13 +23,19 @@ import { homedir } from 'node:os';
 import type { QueryHandler } from './utils.js';
 
 export const agentSkills: QueryHandler = async (args, projectDir) => {
-  const agentType = args[0] || '';
+  const agentType = (args[0] || '').trim();
+  // Match gsd-tools `cmdAgentSkills`: no agent type → empty string (JSON `""`), not a structured object.
+  if (!agentType) {
+    return { data: '' };
+  }
   const skillDirs = [
     join(projectDir, '.claude', 'skills'),
     join(projectDir, '.agents', 'skills'),
     join(projectDir, '.cursor', 'skills'),
     join(projectDir, '.github', 'skills'),
-    join(homedir(), '.claude', 'get-shit-done', 'skills'),
+    join(projectDir, '.codex', 'skills'),
+    join(homedir(), '.claude', 'skills'),
+    join(homedir(), '.codex', 'skills'),
   ];
 
   const skills: string[] = [];
@@ -35,16 +44,19 @@ export const agentSkills: QueryHandler = async (args, projectDir) => {
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.isDirectory()) skills.push(entry.name);
+        if (!entry.isDirectory()) continue;
+        if (!existsSync(join(dir, entry.name, 'SKILL.md'))) continue;
+        skills.push(entry.name);
       }
     } catch { /* skip */ }
   }
 
+  const dedupedSkills = [...new Set(skills)];
   return {
     data: {
       agent_type: agentType,
-      skills: [...new Set(skills)],
-      skill_count: skills.length,
+      skills: dedupedSkills,
+      skill_count: dedupedSkills.length,
     },
   };
 };
