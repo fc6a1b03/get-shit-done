@@ -7201,19 +7201,19 @@ function installSdkIfNeeded() {
   const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
   // 1. Install sdk build-time dependencies (tsc, etc.)
-  const installResult = spawnSync(npmCmd, ['install'], { cwd: sdkDir, stdio: 'inherit' });
+  const installResult = spawnSync(npmCmd, ['install'], { cwd: sdkDir, stdio: 'inherit', shell: process.platform === 'win32' });
   if (installResult.status !== 0) {
     emitSdkFatal('Failed to `npm install` in sdk/.', { globalBin: null, exitCode: 1 });
   }
 
   // 2. Compile TypeScript → sdk/dist/
-  const buildResult = spawnSync(npmCmd, ['run', 'build'], { cwd: sdkDir, stdio: 'inherit' });
+  const buildResult = spawnSync(npmCmd, ['run', 'build'], { cwd: sdkDir, stdio: 'inherit', shell: process.platform === 'win32' });
   if (buildResult.status !== 0) {
     emitSdkFatal('Failed to `npm run build` in sdk/.', { globalBin: null, exitCode: 1 });
   }
 
   // 3. Install the built package globally so `gsd-sdk` lands on PATH.
-  const globalResult = spawnSync(npmCmd, ['install', '-g', '.'], { cwd: sdkDir, stdio: 'inherit' });
+  const globalResult = spawnSync(npmCmd, ['install', '-g', '.'], { cwd: sdkDir, stdio: 'inherit', shell: process.platform === 'win32' });
   if (globalResult.status !== 0) {
     emitSdkFatal('Failed to `npm install -g .` from sdk/.', { globalBin: null, exitCode: 1 });
   }
@@ -7225,7 +7225,7 @@ function installSdkIfNeeded() {
   // a non-executable file and `command -v gsd-sdk` fails on every first install
   // (root cause of #2453). Mirrors the pattern used for hook files in this installer.
   try {
-    const prefixRes = spawnSync(npmCmd, ['config', 'get', 'prefix'], { encoding: 'utf-8' });
+    const prefixRes = spawnSync(npmCmd, ['config', 'get', 'prefix'], { encoding: 'utf-8', shell: process.platform === 'win32' });
     if (prefixRes.status === 0) {
       const npmPrefix = (prefixRes.stdout || '').trim();
       const sdkPkg = JSON.parse(fs.readFileSync(path.join(sdkDir, 'package.json'), 'utf-8'));
@@ -7249,7 +7249,7 @@ function installSdkIfNeeded() {
   }
 
   // Off-PATH: resolve npm global bin dir for actionable remediation.
-  const prefixResult = spawnSync(npmCmd, ['config', 'get', 'prefix'], { encoding: 'utf-8' });
+  const prefixResult = spawnSync(npmCmd, ['config', 'get', 'prefix'], { encoding: 'utf-8', shell: process.platform === 'win32' });
   const prefix = prefixResult.status === 0 ? (prefixResult.stdout || '').trim() : null;
   const globalBin = prefix
     ? (process.platform === 'win32' ? prefix : path.join(prefix, 'bin'))
